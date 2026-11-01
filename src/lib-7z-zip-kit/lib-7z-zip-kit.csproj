@@ -1,0 +1,38 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <AssemblyName>lib-7z-zip-kit</AssemblyName>
+    <PackageId>lib-7z-zip-kit</PackageId>
+    <RootNamespace>Lib7zZipKit</RootNamespace>
+    <Description>Create, extract, test and list 7z and zip archives from .NET on Windows, macOS, Linux and Android. Uses 7-Zip's own engine (through bit7z) where its native libraries ship, and a pure managed engine (SharpCompress) everywhere else.</Description>
+    <PackageTags>7z;7-zip;zip;archive;compression;lzma;extract;android</PackageTags>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="SharpCompress" Version="0.50.5" />
+    <PackageReference Include="System.IO.Hashing" Version="10.0.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="lib-7z-zip-kit.Tests" />
+  </ItemGroup>
+
+  <!--
+    The native engine, from scripts/build-*.{sh,cmd} (artifacts/native/<rid>), packed
+    under runtimes/<rid>/native. Packing a platform needs its build in place, so a
+    release job gathers every artifacts/native/<rid> before running dotnet pack.
+    The universal macOS build serves osx-x64 and osx-arm64 through the "osx" RID.
+  -->
+  <PropertyGroup>
+    <NativeArtifacts>$(MSBuildThisFileDirectory)../../artifacts/native</NativeArtifacts>
+  </PropertyGroup>
+  <ItemGroup>
+    <None Include="$(NativeArtifacts)/win-x64/*.dll" Pack="true" PackagePath="runtimes/win-x64/native" Visible="false" />
+    <None Include="$(NativeArtifacts)/win-arm64/*.dll" Pack="true" PackagePath="runtimes/win-arm64/native" Visible="false" />
+    <None Include="$(NativeArtifacts)/osx/*.so;$(NativeArtifacts)/osx/*.dylib" Pack="true" PackagePath="runtimes/osx/native" Visible="false" />
+    <None Include="$(NativeArtifacts)/linux-x64/*.so" Pack="true" PackagePath="runtimes/linux-x64/native" Visible="false" />
+    <None Include="$(NativeArtifacts)/linux-arm64/*.so" Pack="true" PackagePath="runtimes/linux-arm64/native" Visible="false" />
+    <None Include="$(NativeArtifacts)/android-arm64/*.so" Pack="true" PackagePath="runtimes/android-arm64/native" Visible="false" />
+    <None Include="$(NativeArtifacts)/android-x64/*.so" Pack="true" PackagePath="runtimes/android-x64/native" Visible="false" />
+    <None Include="$(MSBuildThisFileDirectory)../../LICENSE;$(MSBuildThisFileDirectory)../../THIRD_PARTY_NOTICES.md" Pack="true" PackagePath="\" Visible="false" />
+  </ItemGroup>
+</Project>

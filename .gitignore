@@ -1,0 +1,10 @@
+bin/
+obj/
+*.user
+.vs/
+TestResults/
+# Native builds: scripts/build-*.sh|cmd write build/<rid> and artifacts/native/<rid>.
+/build/*/
+artifacts/
+# 7-Zip and bit7z sources, from scripts/fetch-sources.sh.
+_deps/

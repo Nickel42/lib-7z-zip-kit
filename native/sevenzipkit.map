@@ -1,0 +1,5 @@
+/* Linux: export only the C interface from libsevenzipkit.so. */
+{
+  global: szk_*;
+  local: *;
+};

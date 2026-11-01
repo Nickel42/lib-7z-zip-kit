@@ -1,0 +1,57 @@
+<Project>
+  <!--
+    For apps that reference lib-7z-zip-kit as a project (a checkout or submodule)
+    rather than as a NuGet package: copies the native engine for the platform
+    being built next to the app. Import it from the app's project file:
+
+      <Import Project="path/to/lib-7z-zip-kit/build/lib-7z-zip-kit.Native.targets" />
+
+    The libraries come from artifacts/native/<dir> (scripts/build-*.{sh,cmd}),
+    where <dir> follows the RuntimeIdentifier, or the building machine without one:
+
+      win-x64, win-arm64      7z.dll + sevenzipkit.dll
+      osx (osx-*)             7z.so + libsevenzipkit.dylib (universal)
+      linux-x64, linux-arm64  7z.so + libsevenzipkit.so
+      android-arm64, -x64     lib7z.so + libsevenzipkit.so (packaged into the APK)
+
+    Pass -p:SevenZipKitLibDir=<dir> to use any other build. The files stay
+    beside the app in a single-file publish: bit7z loads 7-Zip's library by
+    path, so it must be a real file.
+  -->
+  <PropertyGroup>
+    <Lib7zZipKitRoot Condition="'$(Lib7zZipKitRoot)' == ''">$([MSBuild]::NormalizeDirectory('$(MSBuildThisFileDirectory)..'))</Lib7zZipKitRoot>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(SevenZipKitNativeDir)' == '' And '$(RuntimeIdentifier)' != ''">
+    <SevenZipKitNativeDir Condition="$(RuntimeIdentifier.StartsWith('osx'))">osx</SevenZipKitNativeDir>
+    <SevenZipKitNativeDir Condition="'$(SevenZipKitNativeDir)' == ''">$(RuntimeIdentifier)</SevenZipKitNativeDir>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(SevenZipKitNativeDir)' == ''">
+    <_SzkArch>x64</_SzkArch>
+    <_SzkArch Condition="'$([System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture)' == 'Arm64'">arm64</_SzkArch>
+    <SevenZipKitNativeDir Condition="$([MSBuild]::IsOSPlatform('OSX'))">osx</SevenZipKitNativeDir>
+    <SevenZipKitNativeDir Condition="$([MSBuild]::IsOSPlatform('Linux'))">linux-$(_SzkArch)</SevenZipKitNativeDir>
+    <SevenZipKitNativeDir Condition="'$(SevenZipKitNativeDir)' == ''">win-$(_SzkArch)</SevenZipKitNativeDir>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <SevenZipKitLibDir Condition="'$(SevenZipKitLibDir)' == ''">$(Lib7zZipKitRoot)artifacts/native/$(SevenZipKitNativeDir)</SevenZipKitLibDir>
+    <_SzkIsAndroid Condition="'$(TargetPlatformIdentifier)' == 'android'">true</_SzkIsAndroid>
+  </PropertyGroup>
+
+  <ItemGroup Condition="'$(_SzkIsAndroid)' != 'true'">
+    <None Include="$(SevenZipKitLibDir)/*.dll;$(SevenZipKitLibDir)/*.so;$(SevenZipKitLibDir)/*.dylib" Link="%(Filename)%(Extension)"
+          CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" ExcludeFromSingleFile="true" Visible="false" />
+  </ItemGroup>
+
+  <!-- Android: both ABIs go into the APK when built. -->
+  <ItemGroup Condition="'$(_SzkIsAndroid)' == 'true'">
+    <AndroidNativeLibrary Include="$(Lib7zZipKitRoot)artifacts/native/android-arm64/*.so" Abi="arm64-v8a" />
+    <AndroidNativeLibrary Include="$(Lib7zZipKitRoot)artifacts/native/android-x64/*.so" Abi="x86_64" />
+  </ItemGroup>
+
+  <Target Name="WarnMissingSevenZipKitNative" BeforeTargets="Build"
+          Condition="'$(_SzkIsAndroid)' != 'true' And !Exists('$(SevenZipKitLibDir)/sevenzipkit.dll') And !Exists('$(SevenZipKitLibDir)/libsevenzipkit.dylib') And !Exists('$(SevenZipKitLibDir)/libsevenzipkit.so')">
+    <Warning Text="No lib-7z-zip-kit native engine in $(SevenZipKitLibDir); only the managed engine will work. Build it with lib-7z-zip-kit/scripts (fetch-sources.sh, then build-win.cmd, build-mac.sh or build-linux.sh)." />
+  </Target>
+</Project>

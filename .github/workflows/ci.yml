@@ -1,0 +1,167 @@
+name: CI
+
+# Builds the native engine for every platform, runs the tests on Windows, macOS
+# and Linux against it, builds the Android sample with it, and packs the NuGet
+# package with all of it. Started by hand; release.yml reuses it for tags.
+on:
+  workflow_dispatch:
+  workflow_call:
+    inputs:
+      version:
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+
+env:
+  DOTNET_NOLOGO: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+
+jobs:
+  native:
+    name: Native ${{ matrix.rid }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { rid: win-x64,       os: windows-latest, arch: x64 }
+          - { rid: win-arm64,     os: windows-latest, arch: arm64 }
+          - { rid: osx,           os: macos-latest }
+          # The oldest supported Ubuntu, so the binaries run on older glibc too.
+          - { rid: linux-x64,     os: ubuntu-22.04 }
+          - { rid: linux-arm64,   os: ubuntu-22.04-arm }
+          - { rid: android-arm64, os: ubuntu-latest, arch: arm64 }
+          - { rid: android-x64,   os: ubuntu-latest, arch: x64 }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fetch 7-Zip and bit7z
+        shell: bash
+        run: bash scripts/fetch-sources.sh
+      - name: Build (Windows)
+        if: startsWith(matrix.rid, 'win-')
+        shell: cmd
+        run: call scripts\build-win.cmd ${{ matrix.arch }}
+      - name: Build (macOS)
+        if: matrix.rid == 'osx'
+        run: bash scripts/build-mac.sh
+      - name: Build (Linux)
+        if: startsWith(matrix.rid, 'linux-')
+        run: bash scripts/build-linux.sh
+      - name: Build (Android)
+        if: startsWith(matrix.rid, 'android-')
+        run: ANDROID_NDK_HOME="$ANDROID_NDK_LATEST_HOME" bash scripts/build-android.sh ${{ matrix.arch }}
+      - name: Only szk_* is exported (Linux, Android)
+        if: startsWith(matrix.rid, 'linux-') || startsWith(matrix.rid, 'android-')
+        run: |
+          lib=artifacts/native/${{ matrix.rid }}/libsevenzipkit.so
+          extra="$(nm -D --defined-only "$lib" | awk '$2 ~ /^[TDBRW]$/ {print $3}' | grep -v '^szk_' || true)"
+          if [ -n "$extra" ]; then echo "unexpected exports:"; echo "$extra"; exit 1; fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: native-${{ matrix.rid }}
+          path: artifacts/native/${{ matrix.rid }}
+          if-no-files-found: error
+
+  test:
+    name: Test (${{ matrix.rid }})
+    needs: native
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: windows-latest,   rid: win-x64 }
+          - { os: macos-latest,     rid: osx }
+          - { os: ubuntu-latest,    rid: linux-x64 }
+          - { os: ubuntu-24.04-arm, rid: linux-arm64 }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: native-${{ matrix.rid }}
+          path: artifacts/native/${{ matrix.rid }}
+      - uses: actions/setup-dotnet@v4
+        with:
+          # .NET 8 runtime for the net8.0 test run; the .NET 10 SDK builds everything.
+          dotnet-version: |
+            8.0.x
+            10.0.x
+      - name: Test (net8.0 and net10.0, both engines)
+        run: dotnet test tests/lib-7z-zip-kit.Tests -c Release --logger "trx;LogFilePrefix=${{ matrix.rid }}"
+      - name: The native engine's tests ran
+        shell: bash
+        run: grep -q '7-Zip' tests/lib-7z-zip-kit.Tests/TestResults/*.trx || { echo "native engine tests did not run"; exit 1; }
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: test-results-${{ matrix.rid }}
+          path: "**/TestResults/*.trx"
+          if-no-files-found: ignore
+
+  android:
+    name: Android app build
+    needs: native
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: native-android-*
+          path: artifacts/native
+      - name: Unpack into artifacts/native/<rid>
+        run: for d in artifacts/native/native-*; do mv "$d" "artifacts/native/${d##*/native-}"; done
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - name: Install the Android workload
+        run: dotnet workload install android
+      - name: Build (Release, trimmed)
+        run: dotnet build samples/AndroidSmoke/AndroidSmoke.csproj -c Release
+      - name: The native engine is in the APK
+        run: |
+          apk="$(find samples/AndroidSmoke/bin/Release -name '*-Signed.apk' | head -1)"
+          unzip -l "$apk" | tee apk.txt
+          for f in lib/arm64-v8a/lib7z.so lib/arm64-v8a/libsevenzipkit.so lib/x86_64/lib7z.so lib/x86_64/libsevenzipkit.so; do
+            grep -q "$f" apk.txt || { echo "missing $f"; exit 1; }
+          done
+
+  pack:
+    name: Pack
+    needs: [native, test]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: native-*
+          path: artifacts/native
+      - name: Unpack into artifacts/native/<rid>
+        run: for d in artifacts/native/native-*; do mv "$d" "artifacts/native/${d##*/native-}"; done
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+      - name: Pack
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          VERSION="${VERSION#v}"
+          dotnet pack src/lib-7z-zip-kit -c Release -o artifacts/packages ${VERSION:+-p:Version=$VERSION}
+      - name: Every platform is in the package
+        run: |
+          unzip -l "$(ls artifacts/packages/*.nupkg | grep -v snupkg | head -1)" | tee nupkg.txt
+          for f in runtimes/win-x64/native/sevenzipkit.dll runtimes/win-arm64/native/sevenzipkit.dll \
+                   runtimes/osx/native/libsevenzipkit.dylib runtimes/linux-x64/native/libsevenzipkit.so \
+                   runtimes/linux-arm64/native/libsevenzipkit.so runtimes/android-arm64/native/lib7z.so \
+                   runtimes/android-x64/native/libsevenzipkit.so; do
+            grep -q "$f" nupkg.txt || { echo "missing $f"; exit 1; }
+          done
+      - uses: actions/upload-artifact@v4
+        with:
+          name: packages
+          path: artifacts/packages/*
