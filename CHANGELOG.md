@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- **Dependencies:** SharpCompress 0.50.5 → 0.50.9 (a security fix) and
+  System.IO.Hashing 10.0.0 → 10.0.15 (servicing).
+
 ## 1.0.0-rc.1 (2026-10-31)
 
 First release, extracted from NoIntrovert's archive engine.
