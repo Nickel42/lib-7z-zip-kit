@@ -57,8 +57,13 @@ endif()
 
 add_subdirectory("${SZK_BIT7Z_DIR}" bit7z EXCLUDE_FROM_ALL)
 
-add_library(sevenzipkit SHARED sevenzipkit.cpp sevenzipkit.h)
+add_library(sevenzipkit SHARED sevenzipkit.cpp szk_deflate.cpp sevenzipkit.h)
 target_link_libraries(sevenzipkit PRIVATE bit7z)
+# szk_deflate.cpp uses 7-Zip's codec interfaces (ICoder.h) directly.
+target_include_directories(sevenzipkit PRIVATE "${SZK_7ZIP_DIR}/CPP")
+if(UNIX)
+  target_link_libraries(sevenzipkit PRIVATE ${CMAKE_DL_LIBS})
+endif()
 target_compile_definitions(sevenzipkit PRIVATE BIT7Z_AUTO_FORMAT)
 
 if(APPLE)
