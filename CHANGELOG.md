@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- **`SevenZipDeflater`:** raw deflate (RFC 1951) through 7-Zip's own Deflate encoder, for
+  formats made of independently compressed blocks such as CSO. `sevenzipkit` gains
+  `szk_deflater_create`, `szk_deflate`, `szk_deflater_free` and `szk_deflater_last_error`
+  (the ABI version stays 1; `SevenZipDeflater.IsAvailable` reports an older native build).
 - **Dependencies:** SharpCompress 0.50.5 → 0.50.9 (a security fix) and
   System.IO.Hashing 10.0.0 → 10.0.15 (servicing).
 

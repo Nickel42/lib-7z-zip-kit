@@ -75,6 +75,26 @@ SZK_API szk_status SZK_CALL szk_extract(sevenzipkit *archive, const char *archiv
 SZK_API szk_status SZK_CALL szk_test(sevenzipkit *archive, const char *archive_path,
                                      szk_progress_fn progress, void *user);
 
+/*
+ * Raw deflate (RFC 1951: no zlib or gzip wrapper) through 7-Zip's own Deflate
+ * encoder, for formats made of independently compressed blocks such as CSO.
+ * Added after ABI version 1 without changing it: check that szk_deflater_create
+ * exists before using these. A deflater is not thread-safe; use one per thread.
+ */
+typedef struct szk_deflater szk_deflater;
+
+/* Loads 7-Zip's library from `lib7z_path` and makes a Deflate encoder.
+ * `level` is 1 to 9; 9 is 7-Zip's ultra setting (10 passes, 128 fast bytes). */
+SZK_API szk_status SZK_CALL szk_deflater_create(const char *lib7z_path, int32_t level,
+                                                szk_deflater **out, const char **error);
+SZK_API void SZK_CALL szk_deflater_free(szk_deflater *deflater);
+SZK_API const char *SZK_CALL szk_deflater_last_error(const szk_deflater *deflater);
+
+/* Compresses `in` into `out`. When the result needs more than `out_capacity`
+ * bytes, returns SZK_OK with *out_size set to 0. */
+SZK_API szk_status SZK_CALL szk_deflate(szk_deflater *deflater, const void *in, uint32_t in_size,
+                                        void *out, uint32_t out_capacity, uint32_t *out_size);
+
 #ifdef __cplusplus
 }
 #endif
