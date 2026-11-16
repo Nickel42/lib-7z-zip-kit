@@ -248,4 +248,44 @@ public class NativeEngineTests
         var expected = OperatingSystem.IsWindows() ? "7z.dll" : "7z.so";
         Assert.Equal(expected, SevenZipEngine.SevenZipLibraryName);
     }
+
+    [Fact]
+    public void ThreadLimit_SameFilesAndVerdicts()
+    {
+        if (!SevenZipEngine.IsAvailable(out _)) return;
+        Assert.True(SevenZipEngine.SupportsThreadLimit);
+        using var s = new Scratch();
+        using var e = new SevenZipEngine();
+        var big = Path.Combine(s.Source, "big.bin");
+        File.WriteAllBytes(big, Scratch.Random(3 << 20, 10));
+        // Fastest with 4 threads cuts LZMA2 into several blocks, which 7-Zip decodes in parallel.
+        var sevenZip = s.Path_("mt.7z");
+        e.Compress([s.Source], sevenZip, new CompressOptions { Level = ArchiveLevel.Fastest, Threads = 4, ContentsOnly = true });
+        var zip = s.Path_("mt.zip");
+        e.Compress([s.Source], zip, new CompressOptions { Format = ArchiveFormat.Zip, ContentsOnly = true });
+        var gz = s.Path_("big.bin.gz");
+        using (var f = File.Create(gz))
+        using (var z = new System.IO.Compression.GZipStream(f, System.IO.Compression.CompressionLevel.Fastest))
+            z.Write(File.ReadAllBytes(big));
+
+        var expected = Scratch.Tree(s.Source);
+        foreach (var archive in new[] { sevenZip, zip })
+        foreach (var threads in new[] { 0, 1, 2 })
+        {
+            e.Test(archive, threads);
+            var dir = s.Path_($"{Path.GetFileName(archive)}-{threads}");
+            e.Extract(archive, dir, threads, null);
+            var actual = Scratch.Tree(dir);
+            Assert.Equal(expected.Keys.Order(), actual.Keys.Order());
+            foreach (var (name, data) in expected) Assert.True(data.AsSpan().SequenceEqual(actual[name]), $"{name} differs");
+        }
+        // A format that may not take the setting still extracts.
+        e.Extract(gz, s.Path_("gz-1"), 1);
+        Assert.Equal(File.ReadAllBytes(big), File.ReadAllBytes(s.Path_("gz-1/big.bin")));
+
+        var bytes = File.ReadAllBytes(sevenZip);
+        bytes[bytes.Length / 3] ^= 0xFF;
+        File.WriteAllBytes(sevenZip, bytes);
+        Assert.Throws<ArchiveException>(() => e.Test(sevenZip, 1));
+    }
 }

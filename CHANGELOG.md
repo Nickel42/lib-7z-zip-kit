@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- **`SevenZipEngine`:** `Extract` and `Test` overloads with a `threads` cap on 7-Zip's
+  decoder threads (0 keeps 7-Zip's default, every core), so parallel jobs don't each
+  start one decoder thread per core for multi-block 7z, xz or bzip2 streams.
+  `sevenzipkit` gains `szk_extract2` and `szk_test2`; `SevenZipEngine.SupportsThreadLimit`
+  reports an older native build, which ignores the cap. Output is unchanged.
 - **`SevenZipDeflater`:** raw deflate (RFC 1951) through 7-Zip's own Deflate encoder, for
   formats made of independently compressed blocks such as CSO. `sevenzipkit` gains
   `szk_deflater_create`, `szk_deflate`, `szk_deflater_free` and `szk_deflater_last_error`

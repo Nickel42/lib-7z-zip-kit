@@ -114,16 +114,58 @@ public sealed class SevenZipEngine : IArchiver
     }
 
     /// <summary>Extracts every item of any archive 7-Zip reads into <paramref name="outputDirectory"/>.</summary>
-    public void Extract(string archive, string outputDirectory, Action<double>? progress = null, CancellationToken token = default)
+    public void Extract(string archive, string outputDirectory, Action<double>? progress = null, CancellationToken token = default) =>
+        Extract(archive, outputDirectory, 0, progress, token);
+
+    /// <summary>
+    /// Extracts every item of any archive 7-Zip reads into <paramref name="outputDirectory"/>,
+    /// decoding on at most <paramref name="threads"/> threads (0: 7-Zip's default, every core).
+    /// </summary>
+    /// <remarks>
+    /// Only some streams decode on several threads: 7z archives written as several LZMA2
+    /// blocks (7-Zip's multithreaded compression makes them), xz and bzip2. Each such
+    /// thread holds a block buffer, so the cap bounds memory as well as CPU when several
+    /// jobs run at once. The output is the same for any value. A native build from
+    /// before this option (see <see cref="SupportsThreadLimit"/>) ignores it.
+    /// </remarks>
+    public void Extract(string archive, string outputDirectory, int threads, Action<double>? progress = null, CancellationToken token = default)
     {
         Directory.CreateDirectory(outputDirectory);
-        Run(callback => Native.szk_extract(_handle, Path.GetFullPath(archive), Path.GetFullPath(outputDirectory), callback, IntPtr.Zero),
+        var source = Path.GetFullPath(archive);
+        var target = Path.GetFullPath(outputDirectory);
+        var limit = (uint)Math.Max(0, threads);
+        Run(callback => limit > 0 && SupportsThreadLimit
+                ? Native.szk_extract2(_handle, source, target, limit, callback, IntPtr.Zero)
+                : Native.szk_extract(_handle, source, target, callback, IntPtr.Zero),
             progress, token, null);
     }
 
     /// <summary>Decompresses every item and checks its CRC, writing nothing.</summary>
     public void Test(string archive, Action<double>? progress = null, CancellationToken token = default) =>
-        Run(callback => Native.szk_test(_handle, Path.GetFullPath(archive), callback, IntPtr.Zero), progress, token, null);
+        Test(archive, 0, progress, token);
+
+    /// <summary>
+    /// Decompresses every item and checks its CRC, writing nothing, on at most
+    /// <paramref name="threads"/> decoder threads (0: every core). See
+    /// <see cref="Extract(string, string, int, Action{double}?, CancellationToken)"/>.
+    /// </summary>
+    public void Test(string archive, int threads, Action<double>? progress = null, CancellationToken token = default)
+    {
+        var source = Path.GetFullPath(archive);
+        var limit = (uint)Math.Max(0, threads);
+        Run(callback => limit > 0 && SupportsThreadLimit
+                ? Native.szk_test2(_handle, source, limit, callback, IntPtr.Zero)
+                : Native.szk_test(_handle, source, callback, IntPtr.Zero),
+            progress, token, null);
+    }
+
+    /// <summary>
+    /// Whether this build of sevenzipkit takes a thread limit for Extract and Test
+    /// (szk_extract2). Older builds extract and test on 7-Zip's default thread count.
+    /// </summary>
+    public static bool SupportsThreadLimit => ThreadLimitExport.Value;
+
+    private static readonly Lazy<bool> ThreadLimitExport = new(() => NativeLibraries.HasExport("szk_extract2"));
 
     private void Run(Func<Native.ProgressFn, Native.Status> call, Action<double>? progress, CancellationToken token, string? partialOutput)
     {
@@ -202,6 +244,14 @@ public sealed class SevenZipEngine : IArchiver
         [DllImport(Lib, CallingConvention = CallingConvention.Cdecl)]
         public static extern Status szk_test(IntPtr archive, [MarshalAs(UnmanagedType.LPUTF8Str)] string archivePath,
             ProgressFn progress, IntPtr user);
+
+        [DllImport(Lib, CallingConvention = CallingConvention.Cdecl)]
+        public static extern Status szk_extract2(IntPtr archive, [MarshalAs(UnmanagedType.LPUTF8Str)] string archivePath,
+            [MarshalAs(UnmanagedType.LPUTF8Str)] string outDir, uint threads, ProgressFn progress, IntPtr user);
+
+        [DllImport(Lib, CallingConvention = CallingConvention.Cdecl)]
+        public static extern Status szk_test2(IntPtr archive, [MarshalAs(UnmanagedType.LPUTF8Str)] string archivePath,
+            uint threads, ProgressFn progress, IntPtr user);
     }
 }
 
@@ -225,6 +275,19 @@ internal static class NativeLibraries
                 if (File.Exists(path) && NativeLibrary.TryLoad(path, out handle)) return handle;
             return IntPtr.Zero;
         });
+    }
+
+    /// <summary>Whether sevenzipkit loads and exports <paramref name="name"/>: functions added after ABI version 1.</summary>
+    public static bool HasExport(string name)
+    {
+        try
+        {
+            return NativeLibrary.TryGetExport(NativeLibrary.Load(SevenZipKit, typeof(NativeLibraries).Assembly, null), name, out _);
+        }
+        catch (DllNotFoundException)
+        {
+            return false;
+        }
     }
 
     /// <summary>Places a native file may be, most specific first.</summary>

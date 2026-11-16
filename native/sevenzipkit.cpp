@@ -7,6 +7,7 @@
 #include <bit7z/bitfilecompressor.hpp>
 #include <bit7z/bitfileextractor.hpp>
 #include <bit7z/bitformat.hpp>
+#include <bit7z/bitinputarchive.hpp>
 
 #include <exception>
 #include <memory>
@@ -82,6 +83,17 @@ bool valid_level(int32_t level) {
     return level == 0 || level == 1 || level == 3 || level == 5 || level == 7 || level == 9;
 }
 
+// Caps 7-Zip's decoder threads for one opened archive (0 leaves its default,
+// every core). 7-Zip reads "mt" through the handler's ISetProperties; formats
+// without it, or that reject the setting, decode as before.
+void limit_threads(const bit7z::BitInputArchive &input, uint32_t threads) {
+    if (threads == 0) return;
+    try {
+        input.useFormatProperty(L"mt", threads);
+    } catch (const bit7z::BitException &) {
+    }
+}
+
 } // namespace
 
 extern "C" {
@@ -138,24 +150,40 @@ SZK_API szk_status SZK_CALL szk_compress(sevenzipkit *archive, const szk_compres
 
 SZK_API szk_status SZK_CALL szk_extract(sevenzipkit *archive, const char *archive_path, const char *out_dir,
                                         szk_progress_fn progress, void *user) {
+    return szk_extract2(archive, archive_path, out_dir, 0, progress, user);
+}
+
+SZK_API szk_status SZK_CALL szk_test(sevenzipkit *archive, const char *archive_path,
+                                     szk_progress_fn progress, void *user) {
+    return szk_test2(archive, archive_path, 0, progress, user);
+}
+
+// What BitFileExtractor::extract and ::test do, with the archive opened here
+// so the thread cap can reach it before decoding starts.
+SZK_API szk_status SZK_CALL szk_extract2(sevenzipkit *archive, const char *archive_path, const char *out_dir,
+                                         uint32_t threads, szk_progress_fn progress, void *user) {
     if (archive == nullptr || archive_path == nullptr || out_dir == nullptr) return SZK_BAD_ARGS;
     ProgressBridge bridge(progress, user);
     return guarded(archive, bridge, [&] {
         bit7z::BitFileExtractor extractor(*archive->lib, bit7z::BitFormat::Auto);
         extractor.setOverwriteMode(bit7z::OverwriteMode::Overwrite);
         bridge.attach(extractor);
-        extractor.extract(archive_path, out_dir);
+        const bit7z::BitInputArchive input(extractor, bit7z::tstring(archive_path));
+        limit_threads(input, threads);
+        input.extractTo(out_dir);
     });
 }
 
-SZK_API szk_status SZK_CALL szk_test(sevenzipkit *archive, const char *archive_path,
-                                     szk_progress_fn progress, void *user) {
+SZK_API szk_status SZK_CALL szk_test2(sevenzipkit *archive, const char *archive_path, uint32_t threads,
+                                      szk_progress_fn progress, void *user) {
     if (archive == nullptr || archive_path == nullptr) return SZK_BAD_ARGS;
     ProgressBridge bridge(progress, user);
     return guarded(archive, bridge, [&] {
         bit7z::BitFileExtractor extractor(*archive->lib, bit7z::BitFormat::Auto);
         bridge.attach(extractor);
-        extractor.test(archive_path);
+        const bit7z::BitInputArchive input(extractor, bit7z::tstring(archive_path));
+        limit_threads(input, threads);
+        input.test();
     });
 }
 
