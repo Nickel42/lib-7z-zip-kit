@@ -2,6 +2,7 @@ using System.IO.Hashing;
 using SharpCompress.Archives;
 using SharpCompress.Common;
 using SharpCompress.Readers;
+using SharpCompress.Readers.GZip;
 
 namespace Lib7zZipKit;
 
@@ -60,7 +61,11 @@ public static class ArchiveReader
     /// </summary>
     /// <exception cref="NotSupportedException">A RAR archive, or a password-protected entry.</exception>
     /// <exception cref="InvalidDataException">An entry points outside the destination.</exception>
-    public static void Extract(string archivePath, string destination, Action<double>? progress = null, CancellationToken token = default)
+    public static void Extract(string archivePath, string destination, Action<double>? progress = null, CancellationToken token = default) =>
+        Extract(archivePath, destination, progress, token, systemInflate: true);
+
+    /// <summary><see cref="Extract(string, string, Action{double}?, CancellationToken)"/>, optionally without <see cref="SystemInflate"/> (for tests).</summary>
+    internal static void Extract(string archivePath, string destination, Action<double>? progress, CancellationToken token, bool systemInflate)
     {
         if (ArchiveFiles.IsRar(archivePath) || ArchiveFiles.HasRarSignature(archivePath))
             throw new NotSupportedException(ArchiveFiles.RarNotSupported);
@@ -83,7 +88,7 @@ public static class ArchiveReader
                 count(n);
                 token.ThrowIfCancellationRequested();
             }
-        }, token);
+        }, token, systemInflate);
         progress?.Invoke(1);
     }
 
@@ -92,7 +97,11 @@ public static class ArchiveReader
     /// the format keeps one), writing nothing.
     /// </summary>
     /// <exception cref="ArchiveException">The archive is damaged or a CRC doesn't match.</exception>
-    public static void Test(string archivePath, Action<double>? progress = null, CancellationToken token = default)
+    public static void Test(string archivePath, Action<double>? progress = null, CancellationToken token = default) =>
+        Test(archivePath, progress, token, systemInflate: true);
+
+    /// <summary><see cref="Test(string, Action{double}?, CancellationToken)"/>, optionally without <see cref="SystemInflate"/> (for tests).</summary>
+    internal static void Test(string archivePath, Action<double>? progress, CancellationToken token, bool systemInflate)
     {
         if (ArchiveFiles.IsRar(archivePath) || ArchiveFiles.HasRarSignature(archivePath))
             throw new NotSupportedException(ArchiveFiles.RarNotSupported);
@@ -111,7 +120,7 @@ public static class ArchiveReader
                 }
                 if (entry.Crc != 0 && crc.GetCurrentHashAsUInt32() != (uint)entry.Crc)
                     throw new ArchiveException($"CRC mismatch in {entry.Key}.");
-            }, token);
+            }, token, systemInflate);
         }
         catch (Exception ex) when (ex is not (OutOfMemoryException or OperationCanceledException or ArchiveException or NotSupportedException))
         {
@@ -120,8 +129,12 @@ public static class ArchiveReader
         progress?.Invoke(1);
     }
 
-    /// <summary>Opens each file entry in archive order, so solid blocks are decompressed once.</summary>
-    private static void ForEachEntry(string archivePath, Action<double>? progress, Action<IEntry, Stream, Action<int>> body, CancellationToken token)
+    /// <summary>
+    /// Opens each file entry in archive order, so solid blocks are decompressed once.
+    /// Deflate in zip and gz goes through <see cref="SystemInflate"/> where it can.
+    /// </summary>
+    private static void ForEachEntry(string archivePath, Action<double>? progress, Action<EntryInfo, Stream, Action<int>> body,
+        CancellationToken token, bool systemInflate)
     {
         // 7z needs random access, so it opens as an archive. Everything else streams
         // through a forward-only reader, which also handles tar.gz.
@@ -139,29 +152,41 @@ public static class ArchiveReader
                 if (reader.Entry.IsDirectory) continue;
                 Refuse(reader.Entry);
                 using var src = reader.OpenEntryStream();
-                body(reader.Entry, src, Count);
+                body(EntryInfo.Of(reader.Entry), src, Count);
             }
         }
         else
         {
             using var file = File.OpenRead(archivePath);
             using var reader = ReaderFactory.OpenReader(file, new ReaderOptions { LeaveStreamOpen = true });
+            if (systemInflate && SystemInflate.TryForEach(archivePath, reader, progress, body, token)) return;
             void Count(int _) => progress?.Invoke((double)file.Position / Math.Max(1, file.Length));
+            // A gz's stored size is its length modulo 4 GiB, so it is no size to reserve.
+            var sizeKnown = reader is not GZipReader;
             while (reader.MoveToNextEntry())
             {
                 token.ThrowIfCancellationRequested();
                 if (reader.Entry.IsDirectory) continue;
                 Refuse(reader.Entry);
                 using var src = reader.OpenEntryStream();
-                body(reader.Entry, src, Count);
+                body(EntryInfo.Of(reader.Entry, sizeKnown), src, Count);
             }
         }
     }
 
-    private static void Refuse(IEntry entry)
+    internal static void Refuse(IEntry entry)
     {
         // SharpCompress reports a 7z's empty files (which have no data stream) as encrypted.
         if (entry.IsEncrypted && entry.Size > 0)
             throw new NotSupportedException($"'{entry.Key}' in this archive is password protected.");
     }
+}
+
+/// <summary>
+/// What unpacking and testing need from an entry: its name, stored CRC32 (0 when
+/// none) and unpacked size (0 when unknown or unreliable; only used to reserve space).
+/// </summary>
+internal readonly record struct EntryInfo(string? Key, long Crc, long Size)
+{
+    public static EntryInfo Of(IEntry entry, bool sizeKnown = true) => new(entry.Key, entry.Crc, sizeKnown ? entry.Size : 0);
 }

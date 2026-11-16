@@ -11,6 +11,11 @@
   (through the new `szk_deflater_create2`). Fewer passes run several times faster for a
   slightly larger output; the existing constructor still makes the same bytes.
   `SevenZipDeflater.SupportsTuning` reports an older native build.
+- **`ArchiveReader`:** zip and gz (and tar.gz) entries inflate through .NET's own
+  Deflate (System.IO.Compression, native zlib) instead of SharpCompress's managed port:
+  about twice as fast to test or unpack. Only archives it reads byte for byte as
+  SharpCompress does take this path (stored or Deflate zip entries without encryption,
+  the first gzip member, as before); the rest stay with SharpCompress.
 - **`SevenZipDeflater`:** raw deflate (RFC 1951) through 7-Zip's own Deflate encoder, for
   formats made of independently compressed blocks such as CSO. `sevenzipkit` gains
   `szk_deflater_create`, `szk_deflate`, `szk_deflater_free` and `szk_deflater_last_error`
