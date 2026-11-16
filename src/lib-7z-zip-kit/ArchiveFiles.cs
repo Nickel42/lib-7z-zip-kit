@@ -66,13 +66,20 @@ public static class ArchiveFiles
     {
         var parts = SplitParts(firstPart);
         var target = Path.Combine(destinationDirectory, Path.GetFileName(firstPart[..^4]));
-        var total = Math.Max(1, parts.Sum(p => new FileInfo(p).Length));
+        var size = parts.Sum(p => new FileInfo(p).Length);
+        var total = Math.Max(1, size);
         long done = 0;
         var buffer = new byte[1 << 20];
-        using var dst = File.Create(target);
+        // The joined size is known: reserve it in one go. The parts are read front to back.
+        using var dst = new FileStream(target, new FileStreamOptions
+        {
+            Mode = FileMode.Create,
+            Access = FileAccess.Write,
+            PreallocationSize = size,
+        });
         foreach (var part in parts)
         {
-            using var src = File.OpenRead(part);
+            using var src = new FileStream(part, FileMode.Open, FileAccess.Read, FileShare.Read, 4096, FileOptions.SequentialScan);
             int n;
             while ((n = src.Read(buffer, 0, buffer.Length)) > 0)
             {

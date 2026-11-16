@@ -1,7 +1,23 @@
 # Changelog
 
-## Unreleased
+## 1.0.0-rc.2 (2026-11-16)
 
+- **`SevenZipEngine`:** `Extract` and `Test` overloads with a `threads` cap on 7-Zip's
+  decoder threads (0 keeps 7-Zip's default, every core), so parallel jobs don't each
+  start one decoder thread per core for multi-block 7z, xz or bzip2 streams.
+  `sevenzipkit` gains `szk_extract2` and `szk_test2`; `SevenZipEngine.SupportsThreadLimit`
+  reports an older native build, which ignores the cap. Output is unchanged.
+- **`SevenZipDeflater`:** a constructor that also takes Deflate `passes` and `fastBytes`
+  (through the new `szk_deflater_create2`). Fewer passes run several times faster for a
+  slightly larger output; the existing constructor still makes the same bytes.
+  `SevenZipDeflater.SupportsTuning` reports an older native build.
+- **`ArchiveReader`:** zip and gz (and tar.gz) entries inflate through .NET's own
+  Deflate (System.IO.Compression, native zlib) instead of SharpCompress's managed port:
+  about twice as fast to test or unpack. Only archives it reads byte for byte as
+  SharpCompress does take this path (stored or Deflate zip entries without encryption,
+  the first gzip member, as before); the rest stay with SharpCompress.
+- **`ArchiveReader.Extract`, `ArchiveFiles.JoinSplitParts`:** reserve each output file's
+  size up front where it is known, for contiguous multi-GB images.
 - **`SevenZipDeflater`:** raw deflate (RFC 1951) through 7-Zip's own Deflate encoder, for
   formats made of independently compressed blocks such as CSO. `sevenzipkit` gains
   `szk_deflater_create`, `szk_deflate`, `szk_deflater_free` and `szk_deflater_last_error`

@@ -61,5 +61,53 @@ public class DeflaterTests
     {
         Assert.Throws<ArgumentOutOfRangeException>(() => new SevenZipDeflater(0));
         Assert.Throws<ArgumentOutOfRangeException>(() => new SevenZipDeflater(10));
+        Assert.Throws<ArgumentOutOfRangeException>(() => new SevenZipDeflater(9, 16, 0));
+        Assert.Throws<ArgumentOutOfRangeException>(() => new SevenZipDeflater(9, 0, 2));
+        Assert.Throws<ArgumentOutOfRangeException>(() => new SevenZipDeflater(9, 0, 259));
+    }
+
+    /// <summary>2 KiB blocks, part random and part repeated text, like a CSO's sectors.</summary>
+    private static IEnumerable<byte[]> Blocks()
+    {
+        for (var seed = 0; seed < 8; seed++)
+        {
+            var block = new byte[2048];
+            Text.AsSpan(seed * 37, 2048 - 300).CopyTo(block);
+            new Random(seed).NextBytes(block.AsSpan(2048 - 300));
+            yield return block;
+        }
+    }
+
+    private static List<byte[]> CompressAll(SevenZipDeflater deflater)
+    {
+        var buffer = new byte[4096];
+        return Blocks().Select(b => buffer.AsSpan(0, deflater.Compress(b, buffer)).ToArray()).ToList();
+    }
+
+    [Fact]
+    public void Tuning_LevelValues_GiveTheSameBytes()
+    {
+        if (!SevenZipDeflater.IsAvailable(out _)) return;
+        Assert.True(SevenZipDeflater.SupportsTuning);
+        using var plain = new SevenZipDeflater(9);
+        using var spelledOut = new SevenZipDeflater(9, 10, 128);
+        using var defaults = new SevenZipDeflater(9, 0, 0);
+        var expected = CompressAll(plain);
+        Assert.Equal(expected, CompressAll(spelledOut));
+        Assert.Equal(expected, CompressAll(defaults));
+    }
+
+    [Fact]
+    public void Tuning_FewerPasses_RoundTrips()
+    {
+        if (!SevenZipDeflater.IsAvailable(out _)) return;
+        using var fast = new SevenZipDeflater(9, 3, 64);
+        var buffer = new byte[4096];
+        foreach (var block in Blocks())
+        {
+            var n = fast.Compress(block, buffer);
+            Assert.InRange(n, 1, block.Length);
+            Assert.Equal(block, Inflate(buffer.AsSpan(0, n)));
+        }
     }
 }

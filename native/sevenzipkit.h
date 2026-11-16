@@ -76,6 +76,19 @@ SZK_API szk_status SZK_CALL szk_test(sevenzipkit *archive, const char *archive_p
                                      szk_progress_fn progress, void *user);
 
 /*
+ * szk_extract and szk_test with a cap on 7-Zip's decoder threads: `threads` 0
+ * keeps 7-Zip's default (every core). Only some streams decode on several
+ * threads (7z with several LZMA2 blocks, xz, bzip2); the cap also bounds the
+ * memory those threads take. Formats without the setting ignore it. Added
+ * after ABI version 1 without changing it: check that szk_extract2 exists
+ * before using these.
+ */
+SZK_API szk_status SZK_CALL szk_extract2(sevenzipkit *archive, const char *archive_path, const char *out_dir,
+                                         uint32_t threads, szk_progress_fn progress, void *user);
+SZK_API szk_status SZK_CALL szk_test2(sevenzipkit *archive, const char *archive_path, uint32_t threads,
+                                      szk_progress_fn progress, void *user);
+
+/*
  * Raw deflate (RFC 1951: no zlib or gzip wrapper) through 7-Zip's own Deflate
  * encoder, for formats made of independently compressed blocks such as CSO.
  * Added after ABI version 1 without changing it: check that szk_deflater_create
@@ -87,6 +100,15 @@ typedef struct szk_deflater szk_deflater;
  * `level` is 1 to 9; 9 is 7-Zip's ultra setting (10 passes, 128 fast bytes). */
 SZK_API szk_status SZK_CALL szk_deflater_create(const char *lib7z_path, int32_t level,
                                                 szk_deflater **out, const char **error);
+
+/* szk_deflater_create with two of 7-Zip's Deflate settings overridden: `passes`
+ * (1 to 15 optimization passes; the level sets 1, 3 or 10) and `fast_bytes`
+ * (3 to 258; the level sets 32, 64 or 128). 0 keeps the level's value, so
+ * (level, 0, 0) makes exactly what szk_deflater_create does. Fewer passes or
+ * fast bytes run faster and change the compressed bytes. Added after ABI
+ * version 1: check that szk_deflater_create2 exists before using it. */
+SZK_API szk_status SZK_CALL szk_deflater_create2(const char *lib7z_path, int32_t level, int32_t passes,
+                                                 int32_t fast_bytes, szk_deflater **out, const char **error);
 SZK_API void SZK_CALL szk_deflater_free(szk_deflater *deflater);
 SZK_API const char *SZK_CALL szk_deflater_last_error(const szk_deflater *deflater);
 

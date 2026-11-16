@@ -36,7 +36,8 @@
 
   <PropertyGroup>
     <SevenZipKitLibDir Condition="'$(SevenZipKitLibDir)' == ''">$(Lib7zZipKitRoot)artifacts/native/$(SevenZipKitNativeDir)</SevenZipKitLibDir>
-    <_SzkIsAndroid Condition="'$(TargetPlatformIdentifier)' == 'android'">true</_SzkIsAndroid>
+    <!-- From TargetFramework: a project body importing this file is evaluated before the SDK sets TargetPlatformIdentifier. -->
+    <_SzkIsAndroid Condition="'$([MSBuild]::GetTargetPlatformIdentifier($(TargetFramework)))' == 'android' Or '$(TargetPlatformIdentifier)' == 'android'">true</_SzkIsAndroid>
   </PropertyGroup>
 
   <ItemGroup Condition="'$(_SzkIsAndroid)' != 'true'">
