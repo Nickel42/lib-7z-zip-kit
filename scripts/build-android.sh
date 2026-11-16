@@ -32,7 +32,10 @@ mkdir -p "$out"
 # clang. Bionic has pthreads in libc (no -lpthread), and the assembler
 # routines are left out, as on the other Unix builds.
 bundle="$src7z/CPP/7zip/Bundles/Format7zF"
+# CXX_WARN_FLAGS is empty in 7-Zip's makefile. On x86_64 Bionic's nlink_t is 32-bit, so
+# FileFind.cpp's st_nlink copy trips -Wshorten-64-to-32, which -Werror makes fatal.
 (cd "$bundle" && make -j"$jobs" -f "../../$mak" DISABLE_RAR=1 USE_ASM= \
+    CXX_WARN_FLAGS=-Wno-shorten-64-to-32 \
     "CROSS_COMPILE=$toolchain/bin/$triple$api-" LIB2=-ldl \
     "LD_arch=-Wl,-z,max-page-size=16384 -static-libstdc++")
 cp "$bundle"/b/c_*/7z.so "$out/lib7z.so"
