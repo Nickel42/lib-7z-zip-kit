@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.0.0-rc.2 (2026-11-16)
 
 - **`SevenZipEngine`:** `Extract` and `Test` overloads with a `threads` cap on 7-Zip's
   decoder threads (0 keeps 7-Zip's default, every core), so parallel jobs don't each
