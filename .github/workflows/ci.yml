@@ -49,9 +49,17 @@ jobs:
       - name: Build (Linux)
         if: startsWith(matrix.rid, 'linux-')
         run: bash scripts/build-linux.sh
+      # A pinned NDK: the runner's newest one (r30) turns a 64-to-32-bit warning in 7-Zip's
+      # FileFind.cpp into an error under -Werror.
+      - uses: nttld/setup-ndk@v1
+        if: startsWith(matrix.rid, 'android-')
+        id: ndk
+        with:
+          ndk-version: r28c
+          add-to-path: false
       - name: Build (Android)
         if: startsWith(matrix.rid, 'android-')
-        run: ANDROID_NDK_HOME="$ANDROID_NDK_LATEST_HOME" bash scripts/build-android.sh ${{ matrix.arch }}
+        run: ANDROID_NDK_HOME="${{ steps.ndk.outputs.ndk-path }}" bash scripts/build-android.sh ${{ matrix.arch }}
       - name: Only szk_* is exported (Linux, Android)
         if: startsWith(matrix.rid, 'linux-') || startsWith(matrix.rid, 'android-')
         run: |
