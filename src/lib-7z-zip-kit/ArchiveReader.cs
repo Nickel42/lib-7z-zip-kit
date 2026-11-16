@@ -80,7 +80,13 @@ public static class ArchiveReader
                 throw new InvalidDataException($"Archive entry '{entry.Key}' points outside the extraction folder.");
 
             Directory.CreateDirectory(Path.GetDirectoryName(target)!);
-            using var dst = File.Create(target);
+            // Reserving the size up front gives a multi-GB image one contiguous allocation.
+            using var dst = new FileStream(target, new FileStreamOptions
+            {
+                Mode = FileMode.Create,
+                Access = FileAccess.Write,
+                PreallocationSize = entry.Size > 0 ? entry.Size : 0,
+            });
             int n;
             while ((n = src.Read(buffer, 0, buffer.Length)) > 0)
             {

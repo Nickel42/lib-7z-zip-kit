@@ -16,6 +16,8 @@
   about twice as fast to test or unpack. Only archives it reads byte for byte as
   SharpCompress does take this path (stored or Deflate zip entries without encryption,
   the first gzip member, as before); the rest stay with SharpCompress.
+- **`ArchiveReader.Extract`, `ArchiveFiles.JoinSplitParts`:** reserve each output file's
+  size up front where it is known, for contiguous multi-GB images.
 - **`SevenZipDeflater`:** raw deflate (RFC 1951) through 7-Zip's own Deflate encoder, for
   formats made of independently compressed blocks such as CSO. `sevenzipkit` gains
   `szk_deflater_create`, `szk_deflate`, `szk_deflater_free` and `szk_deflater_last_error`
