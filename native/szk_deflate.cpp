@@ -146,8 +146,16 @@ extern "C" {
 
 SZK_API szk_status SZK_CALL szk_deflater_create(const char *lib7z_path, int32_t level,
                                                 szk_deflater **out, const char **error) {
+    return szk_deflater_create2(lib7z_path, level, 0, 0, out, error);
+}
+
+SZK_API szk_status SZK_CALL szk_deflater_create2(const char *lib7z_path, int32_t level, int32_t passes,
+                                                 int32_t fast_bytes, szk_deflater **out, const char **error) {
     static thread_local std::string create_error;
-    if (out == nullptr || lib7z_path == nullptr || level < 1 || level > 9) return SZK_BAD_ARGS;
+    if (out == nullptr || lib7z_path == nullptr || level < 1 || level > 9 || passes < 0 || passes > 15 ||
+        fast_bytes < 0 || (fast_bytes != 0 && (fast_bytes < 3 || fast_bytes > 258))) {
+        return SZK_BAD_ARGS;
+    }
     *out = nullptr;
     auto fail = [&](const std::string &message) {
         create_error = message;
@@ -201,16 +209,25 @@ SZK_API szk_status SZK_CALL szk_deflater_create(const char *lib7z_path, int32_t 
         return fail("7-Zip's Deflate encoder takes no properties");
     }
     auto *set_props = static_cast<ICompressSetCoderProperties *>(props);
-    const PROPID ids[] = {NCoderPropID::kLevel};
-    PROPVARIANT values[1];
+    // Settings left out take the level's values, as 7-Zip's own -mx does.
+    PROPID ids[3];
+    PROPVARIANT values[3];
     std::memset(values, 0, sizeof(values));
-    values[0].vt = VT_UI4;
-    values[0].ulVal = static_cast<ULONG>(level);
-    const HRESULT set = set_props->SetCoderProperties(ids, values, 1);
+    UInt32 num_props = 0;
+    auto add = [&](PROPID id, int32_t value) {
+        ids[num_props] = id;
+        values[num_props].vt = VT_UI4;
+        values[num_props].ulVal = static_cast<ULONG>(value);
+        num_props++;
+    };
+    add(NCoderPropID::kLevel, level);
+    if (passes != 0) add(NCoderPropID::kNumPasses, passes);
+    if (fast_bytes != 0) add(NCoderPropID::kNumFastBytes, fast_bytes);
+    const HRESULT set = set_props->SetCoderProperties(ids, values, num_props);
     set_props->Release();
     if (set != S_OK) {
         delete deflater;
-        return fail("7-Zip's Deflate encoder rejected the compression level");
+        return fail("7-Zip's Deflate encoder rejected the compression settings");
     }
 
     *out = deflater;

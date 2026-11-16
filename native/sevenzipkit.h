@@ -101,6 +101,17 @@ typedef struct szk_deflater szk_deflater;
 SZK_API szk_status SZK_CALL szk_deflater_create(const char *lib7z_path, int32_t level,
                                                 szk_deflater **out, const char **error);
 
+/* szk_deflater_create with two of 7-Zip's Deflate settings overridden: `passes`
+ * (1 to 15 optimization passes; the level sets 1, 3 or 10) and `fast_bytes`
+ * (3 to 258; the level sets 32, 64 or 128). 0 keeps the level's value, so
+ * (level, 0, 0) makes exactly what szk_deflater_create does. Fewer passes or
+ * fast bytes run faster and change the compressed bytes. Added after ABI
+ * version 1: check that szk_deflater_create2 exists before using it. */
+SZK_API szk_status SZK_CALL szk_deflater_create2(const char *lib7z_path, int32_t level, int32_t passes,
+                                                 int32_t fast_bytes, szk_deflater **out, const char **error);
+SZK_API void SZK_CALL szk_deflater_free(szk_deflater *deflater);
+SZK_API const char *SZK_CALL szk_deflater_last_error(const szk_deflater *deflater);
+
 /* Compresses `in` into `out`. When the result needs more than `out_capacity`
  * bytes, returns SZK_OK with *out_size set to 0. */
 SZK_API szk_status SZK_CALL szk_deflate(szk_deflater *deflater, const void *in, uint32_t in_size,

@@ -16,18 +16,53 @@ public sealed class SevenZipDeflater : IDisposable
 
     /// <summary>Makes a deflater, with 7-Zip's library from <paramref name="sevenZipLibraryPath"/> or the default places.</summary>
     /// <param name="level">1 (fastest) to 9 (7-Zip's ultra setting: 10 passes, 128 fast bytes).</param>
+    /// <param name="sevenZipLibraryPath">7-Zip's library, or null for the default places.</param>
     /// <exception cref="ArchiveException">A library is missing or too old to have the deflater.</exception>
     public SevenZipDeflater(int level = 9, string? sevenZipLibraryPath = null)
+        : this(level, 0, 0, sevenZipLibraryPath)
+    {
+    }
+
+    /// <summary>
+    /// Makes a deflater with two of the level's settings overridden. Fewer passes or fast
+    /// bytes compress faster and change the output (still standard deflate, usually a
+    /// little larger); 0 keeps the level's value, so <c>(level, 0, 0)</c> gives exactly
+    /// what <see cref="SevenZipDeflater(int, string?)"/> does.
+    /// </summary>
+    /// <param name="level">1 (fastest) to 9 (7-Zip's ultra setting).</param>
+    /// <param name="passes">Optimization passes, 1 to 15, or 0 for the level's (1; 3 at level 7; 10 at level 9).</param>
+    /// <param name="fastBytes">Fast bytes, 3 to 258, or 0 for the level's (32; 64 at level 7; 128 at level 9).</param>
+    /// <param name="sevenZipLibraryPath">7-Zip's library, or null for the default places.</param>
+    /// <exception cref="ArchiveException">A library is missing, or too old for the deflater or (with
+    /// <paramref name="passes"/> or <paramref name="fastBytes"/> set) for these settings: see <see cref="SupportsTuning"/>.</exception>
+    public SevenZipDeflater(int level, int passes, int fastBytes, string? sevenZipLibraryPath = null)
     {
         ArgumentOutOfRangeException.ThrowIfLessThan(level, 1);
         ArgumentOutOfRangeException.ThrowIfGreaterThan(level, 9);
+        ArgumentOutOfRangeException.ThrowIfNegative(passes);
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(passes, 15);
+        if (fastBytes != 0)
+        {
+            ArgumentOutOfRangeException.ThrowIfLessThan(fastBytes, 3);
+            ArgumentOutOfRangeException.ThrowIfGreaterThan(fastBytes, 258);
+        }
         if (!IsAvailable(out var problem)) throw new ArchiveException(problem);
+        var tuned = passes != 0 || fastBytes != 0;
+        if (tuned && !SupportsTuning)
+            throw new ArchiveException("This build of sevenzipkit can't set Deflate passes or fast bytes; rebuild lib-7z-zip-kit's native engine.");
         var path = sevenZipLibraryPath ?? SevenZipEngine.FindSevenZipLibrary()
             ?? throw new ArchiveException($"7-Zip's library ({SevenZipEngine.SevenZipLibraryName}) was not found.");
-        var status = Native.szk_deflater_create(path, level, out _handle, out var error);
+        var status = tuned
+            ? Native.szk_deflater_create2(path, level, passes, fastBytes, out _handle, out var error)
+            : Native.szk_deflater_create(path, level, out _handle, out error);
         if (status != Native.Status.Ok)
             throw new ArchiveException($"7-Zip's Deflate encoder could not be made: {Marshal.PtrToStringUTF8(error) ?? status.ToString()}");
     }
+
+    /// <summary>Whether this build of sevenzipkit takes passes and fast bytes (szk_deflater_create2).</summary>
+    public static bool SupportsTuning => TuningExport.Value;
+
+    private static readonly Lazy<bool> TuningExport = new(() => NativeLibraries.HasExport("szk_deflater_create2"));
 
     /// <summary>Whether this build of the native engine has the deflater, and why not when it hasn't.</summary>
     public static bool IsAvailable(out string problem)
@@ -86,6 +121,10 @@ public sealed class SevenZipDeflater : IDisposable
         [DllImport(Lib, CallingConvention = CallingConvention.Cdecl)]
         public static extern Status szk_deflater_create([MarshalAs(UnmanagedType.LPUTF8Str)] string lib7zPath, int level,
             out IntPtr deflater, out IntPtr error);
+
+        [DllImport(Lib, CallingConvention = CallingConvention.Cdecl)]
+        public static extern Status szk_deflater_create2([MarshalAs(UnmanagedType.LPUTF8Str)] string lib7zPath, int level,
+            int passes, int fastBytes, out IntPtr deflater, out IntPtr error);
 
         [DllImport(Lib, CallingConvention = CallingConvention.Cdecl)]
         public static extern void szk_deflater_free(IntPtr deflater);
