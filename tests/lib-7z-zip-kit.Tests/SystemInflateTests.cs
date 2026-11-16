@@ -62,6 +62,42 @@ public class SystemInflateTests
         ArchiveReader.Test(zip);
     }
 
+    /// <summary>A zip written to a pipe (data descriptors, no sizes in the local headers) with non-ASCII names.</summary>
+    [Fact]
+    public void Zip_Streamed_WithDataDescriptorsAndUnicodeNames()
+    {
+        using var s = new Scratch();
+        var zip = s.Path_("streamed.zip");
+        var pipe = new MemoryStream();
+        using (var z = new ZipArchive(new ForwardOnly(pipe), ZipArchiveMode.Create, leaveOpen: true))
+        {
+            using (var e = z.CreateEntry("Pokémon (Japan)/disc 1.bin", CompressionLevel.Optimal).Open())
+                e.Write(File.ReadAllBytes(Path.Combine(s.Source, "a.txt")));
+            using (var e = z.CreateEntry("ゲーム.iso", CompressionLevel.NoCompression).Open())
+                e.Write(Scratch.Random(50_000, 9));
+        }
+        File.WriteAllBytes(zip, pipe.ToArray());
+        Assert.True(Taken(zip));
+        var files = ExtractBothWays(s, zip);
+        Assert.Equal(["Pokémon (Japan)/disc 1.bin", "ゲーム.iso"], files.Keys.Order(StringComparer.Ordinal));
+        ArchiveReader.Test(zip);
+    }
+
+    /// <summary>A write-only stream that can't seek, so ZipArchive writes data descriptors.</summary>
+    private sealed class ForwardOnly(Stream inner) : Stream
+    {
+        public override bool CanRead => false;
+        public override bool CanSeek => false;
+        public override bool CanWrite => true;
+        public override long Length => throw new NotSupportedException();
+        public override long Position { get => inner.Position; set => throw new NotSupportedException(); }
+        public override void Flush() => inner.Flush();
+        public override int Read(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+        public override void SetLength(long value) => throw new NotSupportedException();
+        public override void Write(byte[] buffer, int offset, int count) => inner.Write(buffer, offset, count);
+    }
+
     [Fact]
     public void Zip_From7Zip()
     {
